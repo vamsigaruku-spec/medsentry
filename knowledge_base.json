@@ -1,0 +1,30 @@
+[
+  {
+    "id": "WHO_PHC_001",
+    "title": "WHO Primary Health Care",
+    "source": "World Health Organization",
+    "topic": "primary_health_care",
+    "text": "Primary health care is a whole-of-society approach to health\nthat aims to ensure the highest possible level of health and\nwell-being and equitable distribution.\n\nPrimary health care includes integrated health services,\nhealth promotion, disease prevention, treatment,\nrehabilitation and palliative care.\n\nIt also addresses broader determinants of health and\nempowers individuals, families and communities."
+  },
+  {
+    "id": "WHO_DIABETES_001",
+    "title": "WHO Diabetes",
+    "source": "World Health Organization",
+    "topic": "diabetes",
+    "text": "Diabetes is a chronic metabolic disease characterized by\nelevated blood glucose levels.\n\nDiabetes can cause serious damage to the heart, blood vessels,\neyes, kidneys and nerves.\n\nHealthy diet, physical activity, maintaining a healthy body\nweight and avoiding tobacco are important components of\nreducing risk and managing health.\n\nPeople with diabetes may require ongoing medical care,\nmonitoring and management under appropriate healthcare\nguidance."
+  },
+  {
+    "id": "WHO_HYPERTENSION_001",
+    "title": "WHO Hypertension",
+    "source": "World Health Organization",
+    "topic": "hypertension",
+    "text": "Hypertension is high blood pressure.\n\nMany people with hypertension may not experience obvious\nsymptoms, which is why blood pressure measurement is important.\n\nUncontrolled hypertension can increase the risk of\ncardiovascular disease and other serious health complications.\n\nAppropriate diagnosis and management should involve\nqualified healthcare professionals."
+  },
+  {
+    "id": "WHO_MENTAL_HEALTH_001",
+    "title": "WHO Mental Health",
+    "source": "World Health Organization",
+    "topic": "mental_health",
+    "text": "Mental health is an important component of overall health\nand well-being.\n\nMental health conditions can affect thoughts, emotions,\nbehaviour and daily functioning.\n\nMental health concerns should be assessed in context,\nand people experiencing significant or persistent symptoms\nmay require professional healthcare support."
+  }
+]
