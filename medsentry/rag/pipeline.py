@@ -11,9 +11,9 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 # GenAI components
-from prompt import build_prompt
-from model import generate_answer
-from parser import parse_model_output
+from medsentry.prompt import build_prompt
+from medsentry.model import generate_answer
+from medsentry.parser import parse_model_output
 
 
 # ================================================================
