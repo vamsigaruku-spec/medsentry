@@ -18,31 +18,36 @@ MODEL_NAME = os.getenv(
 
 
 # ================================================================
-# GET GROQ API KEY
+# API KEY
 # ================================================================
 
 def _get_api_key():
-    """
-    Get the Groq API key securely.
 
-    Priority:
-    1. Environment variable
-    2. Streamlit secrets
-    """
-
+    # ------------------------------------------------------------
     # Environment variable
-    api_key = os.getenv("GROQ_API_KEY")
+    # ------------------------------------------------------------
+
+    api_key = os.getenv(
+        "GROQ_API_KEY"
+    )
 
     if api_key:
         return api_key
 
-    # Streamlit Cloud secrets
+    # ------------------------------------------------------------
+    # Streamlit Cloud Secrets
+    # ------------------------------------------------------------
+
     try:
 
         import streamlit as st
 
-        if "GROQ_API_KEY" in st.secrets:
-            return st.secrets["GROQ_API_KEY"]
+        api_key = st.secrets.get(
+            "GROQ_API_KEY"
+        )
+
+        if api_key:
+            return api_key
 
     except Exception:
         pass
@@ -54,7 +59,7 @@ def _get_api_key():
 
 
 # ================================================================
-# CREATE GROQ CLIENT
+# GROQ CLIENT
 # ================================================================
 
 def _get_client():
@@ -71,15 +76,6 @@ def _get_client():
 # ================================================================
 
 def generate_answer(prompt):
-    """
-    Generate an answer using Groq.
-
-    The prompt is created by prompt.py and contains:
-    - System instructions
-    - User question
-    - Retrieved RAG evidence
-    - Medical safety rules
-    """
 
     if not prompt or not str(prompt).strip():
 
@@ -95,12 +91,22 @@ def generate_answer(prompt):
 
         messages=[
             {
+                "role": "system",
+                "content": (
+                    "You are MedSentry, an "
+                    "evidence-grounded medical "
+                    "information assistant. "
+                    "Follow the instructions contained "
+                    "in the user prompt."
+                )
+            },
+            {
                 "role": "user",
                 "content": str(prompt)
             }
         ],
 
-        temperature=0.2,
+        temperature=0.1,
 
         max_tokens=800,
 
@@ -108,53 +114,72 @@ def generate_answer(prompt):
     )
 
     # ------------------------------------------------------------
-    # Extract generated text
+    # Validate response
     # ------------------------------------------------------------
 
-    if not response or not response.choices:
+    if response is None:
 
         raise RuntimeError(
-            "Groq returned an empty response."
+            "Groq returned no response."
         )
 
-    answer = response.choices[0].message.content
+    if not response.choices:
+
+        raise RuntimeError(
+            "Groq returned no choices."
+        )
+
+    message = response.choices[0].message
+
+    if message is None:
+
+        raise RuntimeError(
+            "Groq returned an empty message."
+        )
+
+    answer = message.content
+
+    if answer is None:
+
+        raise RuntimeError(
+            "Groq returned empty content."
+        )
+
+    answer = str(answer).strip()
 
     if not answer:
 
         raise RuntimeError(
-            "Groq did not return any text."
+            "Groq returned an empty answer."
         )
 
-    return answer.strip()
+    return answer
 
 
 # ================================================================
-# SIMPLE MODEL TEST
+# MODEL HEALTH CHECK
 # ================================================================
 
 def test_model():
 
     test_prompt = """
-You are MedSentry, an evidence-grounded medical information assistant.
-
-Answer only from the provided evidence.
-
 QUESTION:
 What is hypertension?
 
-EVIDENCE:
+RETRIEVED EVIDENCE:
 Hypertension is high blood pressure.
 
-Return:
+Return exactly:
 
-ANSWER:
-<answer>
-
-SAFETY:
-<brief safety note>
+{
+  "answer": "A short evidence-grounded answer.",
+  "safety": "A short appropriate safety note."
+}
 """
 
-    return generate_answer(test_prompt)
+    return generate_answer(
+        test_prompt
+    )
 
 
 # ================================================================
@@ -181,6 +206,8 @@ if __name__ == "__main__":
         print("MEDSENTRY GROQ MODEL ERROR")
         print("=" * 60)
 
-        print(str(e))
+        print(
+            f"{type(e).__name__}: {e}"
+        )
 
         print("=" * 60)
