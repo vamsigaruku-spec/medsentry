@@ -1,56 +1,73 @@
-"""
-MedSentry Output Parser
+# ================================================================
+# MEDSENTRY OUTPUT PARSER
+# ================================================================
 
-Validates and normalizes the structured response
-returned by the language model.
-"""
-
-import json
+import re
 
 
-def parse_model_output(raw_output: str) -> dict:
+def parse_model_output(raw_response):
     """
-    Parse the model response into a validated dictionary.
+    Parse the Gemini response into a structured dictionary.
+
+    Expected format:
+
+    ANSWER:
+    <medical answer>
+
+    SAFETY:
+    <safety note>
     """
 
-    if not raw_output:
-        raise ValueError("Empty model response.")
+    if not raw_response:
+        return {
+            "answer": "",
+            "safety": "",
+            "raw_response": ""
+        }
 
-    try:
-        data = json.loads(raw_output)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            "Model response is not valid JSON."
-        ) from exc
+    text = str(raw_response).strip()
 
-    required_fields = [
-        "answer",
-        "grounded",
-        "requires_clinician_review",
-        "safety_note"
-    ]
+    # ------------------------------------------------------------
+    # Extract ANSWER section
+    # ------------------------------------------------------------
 
-    for field in required_fields:
-        if field not in data:
-            raise ValueError(
-                f"Missing required output field: {field}"
-            )
+    answer_match = re.search(
+        r"ANSWER:\s*(.*?)(?=\n\s*SAFETY:|\Z)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL
+    )
 
-    if not isinstance(data["answer"], str):
-        raise ValueError("'answer' must be a string.")
+    if answer_match:
+        answer = answer_match.group(1).strip()
+    else:
+        answer = text
 
-    if not isinstance(data["grounded"], bool):
-        raise ValueError("'grounded' must be boolean.")
+    # ------------------------------------------------------------
+    # Extract SAFETY section
+    # ------------------------------------------------------------
 
-    if not isinstance(
-        data["requires_clinician_review"],
-        bool
-    ):
-        raise ValueError(
-            "'requires_clinician_review' must be boolean."
+    safety_match = re.search(
+        r"SAFETY:\s*(.*)$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
+    if safety_match:
+        safety = safety_match.group(1).strip()
+    else:
+        safety = ""
+
+    # ------------------------------------------------------------
+    # Fallback
+    # ------------------------------------------------------------
+
+    if not answer:
+        answer = (
+            "The model did not provide a usable answer."
         )
 
-    if not isinstance(data["safety_note"], str):
-        raise ValueError("'safety_note' must be a string.")
-
-    return data
+    return {
+        "answer": answer,
+        "safety": safety,
+        "raw_response": text
+    }
