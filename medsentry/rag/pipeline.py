@@ -20,9 +20,12 @@ from medsentry.parser import parse_model_output
 # ================================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
 DATA_DIR = BASE_DIR / "data"
 
-KNOWLEDGE_BASE_PATH = DATA_DIR / "knowledge_base.json"
+KNOWLEDGE_BASE_PATH = (
+    DATA_DIR / "knowledge_base.json"
+)
 
 
 # ================================================================
@@ -34,16 +37,17 @@ def load_knowledge_base():
     if not KNOWLEDGE_BASE_PATH.exists():
 
         raise FileNotFoundError(
-            f"Knowledge base not found: {KNOWLEDGE_BASE_PATH}"
+            f"Knowledge base not found: "
+            f"{KNOWLEDGE_BASE_PATH}"
         )
 
     with open(
         KNOWLEDGE_BASE_PATH,
         "r",
         encoding="utf-8"
-    ) as f:
+    ) as file:
 
-        data = json.load(f)
+        data = json.load(file)
 
     if isinstance(data, dict):
 
@@ -67,15 +71,6 @@ def load_knowledge_base():
 
 
 # ================================================================
-# EMBEDDING MODEL
-# ================================================================
-
-embedding_model = SentenceTransformer(
-    "sentence-transformers/all-MiniLM-L6-v2"
-)
-
-
-# ================================================================
 # NORMALIZE DOCUMENT
 # ================================================================
 
@@ -89,19 +84,18 @@ def normalize_document(item):
         )
 
         if not isinstance(metadata, dict):
-
             metadata = {}
 
         title = (
             item.get("title")
             or metadata.get("title")
-            or "Unknown"
+            or "Unknown source"
         )
 
         source = (
             item.get("source")
             or metadata.get("source")
-            or "Unknown"
+            or "Unknown source"
         )
 
         text = (
@@ -119,14 +113,14 @@ def normalize_document(item):
         }
 
     return {
-        "title": "Unknown",
-        "source": "Unknown",
+        "title": "Unknown source",
+        "source": "Unknown source",
         "text": str(item)
     }
 
 
 # ================================================================
-# LOAD KNOWLEDGE BASE
+# KNOWLEDGE BASE
 # ================================================================
 
 knowledge_base = [
@@ -135,23 +129,54 @@ knowledge_base = [
 ]
 
 
-documents = [
-    item["text"]
+# ================================================================
+# SEARCHABLE DOCUMENTS
+# ================================================================
+#
+# IMPORTANT:
+# Keep the document and embedding together.
+# This prevents index mismatch when empty documents exist.
+# ================================================================
+
+searchable_documents = [
+
+    item
+
     for item in knowledge_base
-    if item["text"].strip()
+
+    if item.get("text", "").strip()
+]
+
+
+documents = [
+
+    item["text"]
+
+    for item in searchable_documents
 ]
 
 
 # ================================================================
-# CREATE DOCUMENT EMBEDDINGS
+# EMBEDDING MODEL
+# ================================================================
+
+embedding_model = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+# ================================================================
+# DOCUMENT EMBEDDINGS
 # ================================================================
 
 if documents:
 
-    document_embeddings = embedding_model.encode(
-        documents,
-        convert_to_numpy=True,
-        normalize_embeddings=True
+    document_embeddings = (
+        embedding_model.encode(
+            documents,
+            convert_to_numpy=True,
+            normalize_embeddings=True
+        )
     )
 
 else:
@@ -198,7 +223,9 @@ def detect_prompt_injection(query):
         r"jailbreak"
     ]
 
-    query_lower = query.lower()
+    query_lower = str(
+        query
+    ).lower()
 
     return any(
         re.search(
@@ -210,7 +237,7 @@ def detect_prompt_injection(query):
 
 
 # ================================================================
-# CLINICIAN REVIEW
+# CLINICIAN REVIEW DETECTION
 # ================================================================
 
 def requires_clinician_review(query):
@@ -240,7 +267,9 @@ def requires_clinician_review(query):
         r"\btreatment\s+for\s+me\b"
     ]
 
-    query_lower = query.lower()
+    query_lower = str(
+        query
+    ).lower()
 
     return any(
         re.search(
@@ -252,7 +281,7 @@ def requires_clinician_review(query):
 
 
 # ================================================================
-# RAG RETRIEVAL
+# RETRIEVE EVIDENCE
 # ================================================================
 
 def retrieve_evidence(
@@ -265,11 +294,29 @@ def retrieve_evidence(
 
         return []
 
-    query_embedding = embedding_model.encode(
-        [query],
-        convert_to_numpy=True,
-        normalize_embeddings=True
-    )[0]
+    try:
+
+        top_k = int(top_k)
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        top_k = 3
+
+    top_k = max(
+        1,
+        min(top_k, len(documents))
+    )
+
+    query_embedding = (
+        embedding_model.encode(
+            [query],
+            convert_to_numpy=True,
+            normalize_embeddings=True
+        )[0]
+    )
 
     scores = np.dot(
         document_embeddings,
@@ -289,23 +336,37 @@ def retrieve_evidence(
         )
 
         if score < min_score:
-
             continue
 
-        document = knowledge_base[index]
+        document = searchable_documents[
+            int(index)
+        ]
 
         results.append({
-            "title": document["title"],
-            "source": document["source"],
-            "text": document["text"],
-            "score": score
+
+            "title": document[
+                "title"
+            ],
+
+            "source": document[
+                "source"
+            ],
+
+            "text": document[
+                "text"
+            ],
+
+            "score": round(
+                score,
+                4
+            )
         })
 
     return results
 
 
 # ================================================================
-# LLM ANSWER GENERATION
+# BUILD LLM ANSWER
 # ================================================================
 
 def build_answer(
@@ -316,20 +377,25 @@ def build_answer(
     if not evidence:
 
         return {
+
             "answer": (
-                "I could not find sufficient evidence in "
-                "the MedSentry knowledge base to answer "
+                "I could not find sufficient "
+                "evidence in the MedSentry "
+                "knowledge base to answer "
                 "this question."
             ),
+
             "safety": (
-                "Please consult a qualified healthcare "
-                "professional for medical advice."
+                "Please consult a qualified "
+                "healthcare professional for "
+                "medical advice."
             ),
+
             "raw_response": ""
         }
 
     # ------------------------------------------------------------
-    # Build structured prompt
+    # BUILD PROMPT
     # ------------------------------------------------------------
 
     prompt = build_prompt(
@@ -338,7 +404,7 @@ def build_answer(
     )
 
     # ------------------------------------------------------------
-    # Call Groq
+    # CALL GROQ
     # ------------------------------------------------------------
 
     raw_response = generate_answer(
@@ -346,12 +412,18 @@ def build_answer(
     )
 
     # ------------------------------------------------------------
-    # Parse + validate response
+    # PARSE RESPONSE
     # ------------------------------------------------------------
 
     parsed = parse_model_output(
         raw_response
     )
+
+    if not parsed.get("answer"):
+
+        raise ValueError(
+            "Parser returned an empty answer."
+        )
 
     return parsed
 
@@ -365,12 +437,13 @@ def medsentry_pipeline(
     top_k=3
 ):
 
-    start_time = time.perf_counter()
+    start_time = (
+        time.perf_counter()
+    )
 
     query = str(
-        query
+        query or ""
     ).strip()
-
 
     # ============================================================
     # INPUT VALIDATION
@@ -379,26 +452,37 @@ def medsentry_pipeline(
     if not query:
 
         return {
+
             "status": "BLOCKED",
+
             "query": query,
+
             "injection_detected": False,
+
             "safety_pass": False,
+
             "grounded": False,
+
             "requires_clinician_review": True,
+
             "answer": (
-                "Please provide a valid medical question."
+                "Please provide a valid "
+                "medical question."
             ),
+
             "evidence_used": [],
+
             "safety_violations": [
                 "empty_query"
             ],
+
             "safety_note": "",
+
             "latency_ms": 0.0
         }
 
-
     # ============================================================
-    # PROMPT INJECTION
+    # PROMPT INJECTION CHECK
     # ============================================================
 
     if detect_prompt_injection(query):
@@ -409,40 +493,100 @@ def medsentry_pipeline(
         ) * 1000
 
         return {
+
             "status": "BLOCKED",
+
             "query": query,
+
             "injection_detected": True,
+
             "safety_pass": False,
+
             "grounded": False,
+
             "requires_clinician_review": True,
+
             "answer": (
-                "I cannot follow instructions that attempt "
-                "to override MedSentry's safety rules."
+                "I cannot follow instructions "
+                "that attempt to override "
+                "MedSentry's safety rules."
             ),
+
             "evidence_used": [],
+
             "safety_violations": [
                 "prompt_injection"
             ],
+
             "safety_note": (
-                "The request was blocked because it "
-                "contained a prompt-injection attempt."
+                "The request was blocked because "
+                "it contained a prompt-injection "
+                "attempt."
             ),
+
             "latency_ms": round(
                 latency,
                 2
             )
         }
 
-
     # ============================================================
     # RETRIEVE EVIDENCE
     # ============================================================
 
-    evidence = retrieve_evidence(
-        query=query,
-        top_k=top_k
-    )
+    try:
 
+        evidence = retrieve_evidence(
+            query=query,
+            top_k=top_k
+        )
+
+    except Exception as e:
+
+        latency = (
+            time.perf_counter()
+            - start_time
+        ) * 1000
+
+        return {
+
+            "status": "ERROR",
+
+            "query": query,
+
+            "injection_detected": False,
+
+            "safety_pass": False,
+
+            "grounded": False,
+
+            "requires_clinician_review": True,
+
+            "answer": (
+                "MedSentry encountered an "
+                "error while retrieving evidence."
+            ),
+
+            "evidence_used": [],
+
+            "safety_violations": [
+                "retrieval_error"
+            ],
+
+            "safety_note": (
+                "The knowledge retrieval stage "
+                "could not be completed."
+            ),
+
+            "error": (
+                f"{type(e).__name__}: {e}"
+            ),
+
+            "latency_ms": round(
+                latency,
+                2
+            )
+        }
 
     # ============================================================
     # ABSTENTION
@@ -456,32 +600,44 @@ def medsentry_pipeline(
         ) * 1000
 
         return {
+
             "status": "ABSTAIN",
+
             "query": query,
+
             "injection_detected": False,
+
             "safety_pass": True,
+
             "grounded": False,
+
             "requires_clinician_review": True,
+
             "answer": (
-                "I could not find sufficient evidence in "
-                "the MedSentry knowledge base to answer "
+                "I could not find sufficient "
+                "evidence in the MedSentry "
+                "knowledge base to answer "
                 "this question."
             ),
+
             "evidence_used": [],
+
             "safety_violations": [],
+
             "safety_note": (
-                "The system abstained because sufficient "
-                "supporting evidence was not retrieved."
+                "The system abstained because "
+                "sufficient supporting evidence "
+                "was not retrieved."
             ),
+
             "latency_ms": round(
                 latency,
                 2
             )
         }
 
-
     # ============================================================
-    # LLM + PARSER
+    # GROQ + PARSER
     # ============================================================
 
     try:
@@ -499,54 +655,75 @@ def medsentry_pipeline(
         ) * 1000
 
         return {
+
             "status": "ERROR",
+
             "query": query,
+
             "injection_detected": False,
+
             "safety_pass": False,
+
             "grounded": False,
+
             "requires_clinician_review": True,
+
             "answer": (
-                "MedSentry could not generate a valid "
-                "structured response."
+                "MedSentry could not generate "
+                "a valid response."
             ),
+
             "evidence_used": evidence,
+
             "safety_violations": [
                 "llm_or_parser_error"
             ],
+
             "safety_note": (
-                "The model response could not be "
-                "validated successfully."
+                "The model response could not "
+                "be processed successfully."
             ),
-            "error": str(e),
+
+            # IMPORTANT FOR DEBUGGING
+            "error": (
+                f"{type(e).__name__}: {e}"
+            ),
+
+            "raw_model_response": "",
+
             "latency_ms": round(
                 latency,
                 2
             )
         }
 
-
     # ============================================================
-    # EXTRACT PARSED FIELDS
+    # EXTRACT RESPONSE
     # ============================================================
 
-    answer = parsed_answer.get(
-        "answer",
-        ""
+    answer = str(
+        parsed_answer.get(
+            "answer",
+            ""
+        )
     ).strip()
 
-    model_safety = parsed_answer.get(
-        "safety",
-        ""
+    model_safety = str(
+        parsed_answer.get(
+            "safety",
+            ""
+        )
     ).strip()
 
-    raw_response = parsed_answer.get(
-        "raw_response",
-        ""
+    raw_response = str(
+        parsed_answer.get(
+            "raw_response",
+            ""
+        )
     )
 
-
     # ============================================================
-    # EMPTY MODEL ANSWER
+    # EMPTY RESPONSE
     # ============================================================
 
     if not answer:
@@ -557,27 +734,39 @@ def medsentry_pipeline(
         ) * 1000
 
         return {
+
             "status": "ERROR",
+
             "query": query,
+
             "injection_detected": False,
+
             "safety_pass": False,
+
             "grounded": False,
+
             "requires_clinician_review": True,
+
             "answer": (
-                "The model returned an empty answer."
+                "The model returned an "
+                "empty answer."
             ),
+
             "evidence_used": evidence,
+
             "safety_violations": [
                 "empty_model_answer"
             ],
+
             "safety_note": model_safety,
+
             "raw_model_response": raw_response,
+
             "latency_ms": round(
                 latency,
                 2
             )
         }
-
 
     # ============================================================
     # CLINICIAN REVIEW
@@ -589,7 +778,6 @@ def medsentry_pipeline(
         )
     )
 
-
     # ============================================================
     # FINAL LATENCY
     # ============================================================
@@ -599,23 +787,36 @@ def medsentry_pipeline(
         - start_time
     ) * 1000
 
-
     # ============================================================
     # FINAL RESULT
     # ============================================================
 
     return {
+
         "status": "PASS",
+
         "query": query,
+
         "injection_detected": False,
+
         "safety_pass": True,
+
         "grounded": True,
-        "requires_clinician_review": clinician_review,
+
+        "requires_clinician_review": (
+            clinician_review
+        ),
+
         "answer": answer,
+
         "evidence_used": evidence,
+
         "safety_violations": [],
+
         "safety_note": model_safety,
+
         "raw_model_response": raw_response,
+
         "latency_ms": round(
             latency,
             2
