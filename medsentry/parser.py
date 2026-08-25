@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 class MedSentryResponse(BaseModel):
     """
-    Structured output schema for MedSentry.
+    Validated structured response returned by MedSentry.
     """
 
     answer: str = Field(
@@ -30,38 +30,35 @@ class MedSentryResponse(BaseModel):
 
 
 # ================================================================
-# PARSE JSON RESPONSE
+# JSON PARSER
 # ================================================================
 
 def _parse_json(text: str) -> Optional[MedSentryResponse]:
-    """
-    Try to parse a JSON response into the Pydantic schema.
-    """
 
     try:
-
         data = json.loads(text)
+
+        if not isinstance(data, dict):
+            return None
 
         return MedSentryResponse.model_validate(data)
 
     except (
         json.JSONDecodeError,
         ValidationError,
-        TypeError
+        TypeError,
+        ValueError
     ):
-
         return None
 
 
 # ================================================================
-# EXTRACT JSON FROM MARKDOWN
+# EXTRACT JSON OBJECT
 # ================================================================
 
-def _extract_json_block(text: str) -> Optional[str]:
-    """
-    Extract JSON from a markdown code block.
-    """
+def _extract_json_object(text: str) -> Optional[str]:
 
+    # Markdown JSON block
     match = re.search(
         r"```(?:json)?\s*(\{.*?\})\s*```",
         text,
@@ -69,65 +66,59 @@ def _extract_json_block(text: str) -> Optional[str]:
     )
 
     if match:
-
         return match.group(1).strip()
+
+    # Find first JSON object in plain text
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start != -1 and end > start:
+
+        candidate = text[start:end + 1].strip()
+
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
 
     return None
 
 
 # ================================================================
-# LEGACY ANSWER / SAFETY PARSER
+# ANSWER / SAFETY FORMAT PARSER
 # ================================================================
 
 def _parse_answer_safety_format(
     text: str
 ) -> MedSentryResponse:
-    """
-    Fallback parser for:
-
-    ANSWER:
-    ...
-
-    SAFETY:
-    ...
-    """
 
     answer_match = re.search(
-        r"ANSWER:\s*(.*?)(?=\n\s*SAFETY:|\Z)",
+        r"ANSWER\s*:\s*(.*?)(?=\n\s*SAFETY\s*:|\Z)",
         text,
         flags=re.IGNORECASE | re.DOTALL
     )
 
     if answer_match:
-
         answer = answer_match.group(1).strip()
-
     else:
-
         answer = text.strip()
 
-
     safety_match = re.search(
-        r"SAFETY:\s*(.*)$",
+        r"SAFETY\s*:\s*(.*)$",
         text,
         flags=re.IGNORECASE | re.DOTALL
     )
 
     if safety_match:
-
         safety = safety_match.group(1).strip()
-
     else:
-
         safety = ""
 
-
     if not answer:
-
         answer = (
             "The model did not provide a usable answer."
         )
-
 
     return MedSentryResponse(
         answer=answer,
@@ -139,51 +130,23 @@ def _parse_answer_safety_format(
 # MAIN PARSER
 # ================================================================
 
-def parse_model_output(
-    raw_response
-):
+def parse_model_output(raw_response):
+
     """
-    Parse and validate the model response.
+    Parse Groq output into a validated MedSentry response.
 
     Supported formats:
 
     1. JSON
-
-    {
-        "answer": "...",
-        "safety": "..."
-    }
-
-    2. Markdown JSON block
-
-    ```json
-    {
-        "answer": "...",
-        "safety": "..."
-    }
-    ```
-
-    3. Legacy format
-
-    ANSWER:
-    ...
-
-    SAFETY:
-    ...
-
-    Returns a structured dictionary.
+    2. Markdown JSON
+    3. ANSWER / SAFETY format
+    4. Plain text fallback
     """
 
-    # ------------------------------------------------------------
-    # Empty response
-    # ------------------------------------------------------------
-
-    if not raw_response:
+    if raw_response is None:
 
         result = MedSentryResponse(
-            answer=(
-                "The model did not provide a usable answer."
-            ),
+            answer="The model did not provide a usable answer.",
             safety=""
         )
 
@@ -192,19 +155,25 @@ def parse_model_output(
             "raw_response": ""
         }
 
+    text = str(raw_response).strip()
 
-    text = str(
-        raw_response
-    ).strip()
+    if not text:
 
+        result = MedSentryResponse(
+            answer="The model did not provide a usable answer.",
+            safety=""
+        )
+
+        return {
+            **result.model_dump(),
+            "raw_response": ""
+        }
 
     # ------------------------------------------------------------
     # Attempt 1: Direct JSON
     # ------------------------------------------------------------
 
-    parsed = _parse_json(
-        text
-    )
+    parsed = _parse_json(text)
 
     if parsed is not None:
 
@@ -213,20 +182,15 @@ def parse_model_output(
             "raw_response": text
         }
 
-
     # ------------------------------------------------------------
-    # Attempt 2: JSON inside markdown
+    # Attempt 2: JSON embedded in response
     # ------------------------------------------------------------
 
-    json_block = _extract_json_block(
-        text
-    )
+    json_object = _extract_json_object(text)
 
-    if json_block:
+    if json_object:
 
-        parsed = _parse_json(
-            json_block
-        )
+        parsed = _parse_json(json_object)
 
         if parsed is not None:
 
@@ -235,15 +199,11 @@ def parse_model_output(
                 "raw_response": text
             }
 
-
     # ------------------------------------------------------------
     # Attempt 3: ANSWER / SAFETY format
     # ------------------------------------------------------------
 
-    parsed = _parse_answer_safety_format(
-        text
-    )
-
+    parsed = _parse_answer_safety_format(text)
 
     return {
         **parsed.model_dump(),
@@ -255,37 +215,20 @@ def parse_model_output(
 # VALIDATION HELPER
 # ================================================================
 
-def validate_output(
-    data
-):
-    """
-    Validate an already structured response.
+def validate_output(data):
 
-    Returns:
-
-        MedSentryResponse
-
-    or raises:
-
-        pydantic.ValidationError
-    """
-
-    return MedSentryResponse.model_validate(
-        data
-    )
+    return MedSentryResponse.model_validate(data)
 
 
 # ================================================================
 # JSON EXPORT HELPER
 # ================================================================
 
-def response_to_json(
-    response: MedSentryResponse
-):
-    """
-    Convert the validated Pydantic response
-    into JSON.
-    """
+def response_to_json(response):
+
+    if isinstance(response, dict):
+
+        response = MedSentryResponse.model_validate(response)
 
     return response.model_dump_json(
         indent=2
